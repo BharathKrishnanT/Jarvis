@@ -173,7 +173,15 @@ You can manage scheduled tasks and background processes. If a user natively asks
 
       if (this.useLocalLLM()) {
         this.currentThought.set('Engaging Local Open Source LLM (Ollama)...');
-        finalResponse = await this.processWithOllama(text, systemInstruction);
+        try {
+          finalResponse = await this.processWithOllama(text, systemInstruction);
+        } catch (e: any) {
+          this.addMessage('system', `[WARNING] Local LLM (Ollama) unreachable: ${e.message}. Falling back to Cloud Intelligence Core...`);
+          this.useLocalLLM.set(false);
+          if (!this.ai) throw new Error('Cloud LLM is also unavailable. Please check your API keys.');
+          this.currentThought.set('Engaging Cloud LLM core...');
+          finalResponse = await this.processWithGemini(text, systemInstruction);
+        }
       } else {
         if (!this.ai) throw new Error('No LLM Provider available (Gemini API missing and Local LLM disabled)');
         this.currentThought.set('Engaging Cloud LLM core...');
