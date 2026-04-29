@@ -91,7 +91,7 @@ export class JarvisService {
   public uploadedFiles = signal<{name: string, content: string}[]>([]);
   
   // Use Local Ollama API (Free Open Source App)
-  public useLocalLLM = signal<boolean>(true);
+  public useLocalLLM = signal<boolean>(false);
   
   public metrics = signal<SystemMetrics>({
     cpu: 12,
@@ -103,13 +103,11 @@ export class JarvisService {
   constructor() {
     this.addMessage('system', 'INITIALIZING CENTRAL INTELLIGENCE CORE...\nBOOT SEQUENCE COMPLETE.\nAWAITING DIRECTIVE.');
     
-    // Attempt init Gemini as fallback
+    // Attempt init Gemini
     try {
       // @ts-ignore
-      if (typeof GEMINI_API_KEY !== 'undefined') {
-        // @ts-ignore
-        this.ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      }
+      let key = "AIzaSyD_tbyWpb1nOcVEep0nn_57bSfhtU2Lmzk";
+      this.ai = new GoogleGenAI({ apiKey: key });
     } catch(e) {}
 
     if (typeof window !== 'undefined') {
