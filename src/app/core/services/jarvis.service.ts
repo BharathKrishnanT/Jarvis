@@ -106,7 +106,7 @@ export class JarvisService {
     // Attempt init Gemini
     try {
       // @ts-ignore
-      let key = "AIzaSyD_tbyWpb1nOcVEep0nn_57bSfhtU2Lmzk";
+      let key = "AIzaSyApOAUtowArFpbf9CwlnmMG3gdYE6bLevE";
       this.ai = new GoogleGenAI({ apiKey: key });
     } catch(e) {}
 
