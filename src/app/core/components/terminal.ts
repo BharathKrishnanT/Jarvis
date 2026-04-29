@@ -52,11 +52,19 @@ import { JarvisService } from '../services/jarvis.service';
           placeholder="Enter directive..."
           [attr.disabled]="jarvis.isProcessing() ? true : null"
         />
+        <input type="file" #fileInput (change)="onFileSelected($event)" class="hidden" accept=".txt,.json,.md,.csv" />
+        <button 
+          (click)="fileInput.click()" 
+          class="w-8 h-8 shrink-0 flex items-center justify-center rounded-sm transition-colors text-[#555] hover:text-[#00d2ff] bg-[#222]"
+          title="Upload Document"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+        </button>
         <button 
           (click)="toggleListening()" 
           class="w-8 h-8 shrink-0 flex items-center justify-center rounded-sm transition-colors mr-1"
-          [ngClass]="isListening ? 'bg-red-500/20 text-red-500' : 'text-[#555] hover:text-[#00d2ff] bg-[#222]'"
-          title="Voice Command"
+          [ngClass]="isAlwaysListening ? 'bg-red-500/20 text-red-500 animate-pulse' : 'text-[#555] hover:text-[#00d2ff] bg-[#222]'"
+          title="Toggle Always-Listening Wake Word"
         >
           <!-- Mic Icon -->
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="m9 22 6-6"/><path d="M12 2A4 4 0 0 0 8 6v6a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
@@ -80,6 +88,7 @@ export class TerminalComponent implements AfterViewChecked {
   inputCtrl = new FormControl('');
   sessionId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
+  isAlwaysListening = false;
   isListening = false;
   recognition: any;
 
@@ -89,6 +98,16 @@ export class TerminalComponent implements AfterViewChecked {
 
   ngAfterViewChecked() {
     this.scrollToBottom();
+  }
+
+  async onFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const file = input.files[0];
+      await this.jarvis.uploadFile(file);
+      // reset the input
+      input.value = '';
+    }
   }
 
   private scrollToBottom() {
@@ -110,8 +129,9 @@ export class TerminalComponent implements AfterViewChecked {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       this.recognition = new SpeechRecognition();
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
+      // Continuous listening for wake word
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
       this.recognition.lang = 'en-US';
 
       this.recognition.onstart = () => {
@@ -120,21 +140,51 @@ export class TerminalComponent implements AfterViewChecked {
       };
 
       this.recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        this.inputCtrl.setValue(transcript);
-        this.submit();
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const fullText = (finalTranscript || interimTranscript).toLowerCase();
+        
+        // Wake word detection
+        if (fullText.includes('jarvis') || fullText.includes('wake up')) {
+          const wakeIndex = Math.max(fullText.lastIndexOf('jarvis'), fullText.lastIndexOf('wake up'));
+          const cmdLength = fullText.lastIndexOf('jarvis') > fullText.lastIndexOf('wake up') ? 6 : 7;
+          
+          const command = fullText.substring(wakeIndex + cmdLength).trim();
+          
+          if (command && event.results[event.results.length - 1].isFinal) {
+            this.inputCtrl.setValue(command);
+            this.submit();
+          }
+        }
         this.cdr.detectChanges();
       };
 
       this.recognition.onerror = (event: any) => {
         console.error('Speech recognition error', event.error);
-        this.isListening = false;
+        if (event.error !== 'no-speech') {
+          this.isListening = false;
+        }
         this.cdr.detectChanges();
       };
 
       this.recognition.onend = () => {
         this.isListening = false;
         this.cdr.detectChanges();
+        // Auto restart if always listening mode is enabled
+        if (this.isAlwaysListening) {
+          setTimeout(() => {
+            try { this.recognition.start(); } catch(e) {}
+          }, 500);
+        }
       };
     }
   }
@@ -142,10 +192,13 @@ export class TerminalComponent implements AfterViewChecked {
   toggleListening() {
     if (!this.recognition) return;
     
-    if (this.isListening) {
-      this.recognition.stop();
+    this.isAlwaysListening = !this.isAlwaysListening;
+    
+    if (this.isAlwaysListening) {
+      try { this.recognition.start(); } catch(e) {}
     } else {
-      this.recognition.start();
+      this.recognition.stop();
     }
   }
 }
+

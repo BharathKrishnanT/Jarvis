@@ -1,5 +1,5 @@
 import { Injectable, signal, computed } from '@angular/core';
-import { GoogleGenAI, FunctionDeclaration, Type, Modality } from '@google/genai';
+import { GoogleGenAI, FunctionDeclaration, Type } from '@google/genai';
 
 export interface JarvisMessage {
   role: 'user' | 'assistant' | 'system';
@@ -14,7 +14,7 @@ export interface SystemMetrics {
   temperature: number;
 }
 
-const internetSearchDef: FunctionDeclaration = {
+const internetSearchDef = {
   name: 'internetSearch',
   description: 'Search the web or retrieve information about real-world entities, news, or current events.',
   parameters: {
@@ -26,7 +26,7 @@ const internetSearchDef: FunctionDeclaration = {
   }
 };
 
-const fileSearchDef: FunctionDeclaration = {
+const fileSearchDef = {
   name: 'fileSearch',
   description: 'Search local file system, documents, and notes.',
   parameters: {
@@ -38,7 +38,7 @@ const fileSearchDef: FunctionDeclaration = {
   }
 };
 
-const hardwareCommandDef: FunctionDeclaration = {
+const hardwareCommandDef = {
   name: 'hardwareCommand',
   description: 'Send commands to connected IoT hardware, microcontrollers, or drones via MQTT.',
   parameters: {
@@ -51,7 +51,7 @@ const hardwareCommandDef: FunctionDeclaration = {
   }
 };
 
-const createTaskDef: FunctionDeclaration = {
+const createTaskDef = {
   name: 'createTask',
   description: 'Create a new background task or scheduled process.',
   parameters: {
@@ -64,7 +64,7 @@ const createTaskDef: FunctionDeclaration = {
   }
 };
 
-const manageTaskDef: FunctionDeclaration = {
+const manageTaskDef = {
   name: 'manageTask',
   description: 'Manage an existing task (e.g., start, stop, pause, delete).',
   parameters: {
@@ -81,11 +81,17 @@ const manageTaskDef: FunctionDeclaration = {
   providedIn: 'root'
 })
 export class JarvisService {
-  private ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  private ai! : any;
   
   public messages = signal<JarvisMessage[]>([]);
   public isProcessing = signal<boolean>(false);
   public currentThought = signal<string>('');
+  
+  // Storage for uploaded files
+  public uploadedFiles = signal<{name: string, content: string}[]>([]);
+  
+  // Use Local Ollama API (Free Open Source App)
+  public useLocalLLM = signal<boolean>(true);
   
   public metrics = signal<SystemMetrics>({
     cpu: 12,
@@ -96,6 +102,16 @@ export class JarvisService {
 
   constructor() {
     this.addMessage('system', 'INITIALIZING CENTRAL INTELLIGENCE CORE...\nBOOT SEQUENCE COMPLETE.\nAWAITING DIRECTIVE.');
+    
+    // Attempt init Gemini as fallback
+    try {
+      // @ts-ignore
+      if (typeof GEMINI_API_KEY !== 'undefined') {
+        // @ts-ignore
+        this.ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      }
+    } catch(e) {}
+
     if (typeof window !== 'undefined') {
       setInterval(() => this.updateMetrics(), 2000);
     }
@@ -114,6 +130,31 @@ export class JarvisService {
     this.messages.update(msgs => [...msgs, { role, content, timestamp: new Date() }]);
   }
 
+  public async uploadFile(file: File) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      this.uploadedFiles.update(files => [...files, { name: file.name, content: text }]);
+      this.addMessage('system', `[FILE UPLOADED AND INDEXED] ${file.name}`);
+    } catch (err) {
+      this.addMessage('system', `[UPLOAD ERROR] Failed to read ${file.name}`);
+    }
+  }
+
+  public speak(text: string) {
+    if (typeof window === 'undefined') return;
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.1;
+      utterance.pitch = 0.9;
+      const voices = window.speechSynthesis.getVoices();
+      const ukVoice = voices.find(v => v.lang === 'en-GB' || v.name.includes('UK'));
+      if (ukVoice) utterance.voice = ukVoice;
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+
   public async processInput(text: string) {
     if (!text.trim()) return;
     
@@ -128,84 +169,169 @@ Whenever you are asked to perform tasks outside simple text completion, use your
 If you perform an action via tools, narrate your process succinctly (e.g., "Accessing local file system...", "Deploying hardware command...").
 You can manage scheduled tasks and background processes. If a user natively asks to create or manage a task (e.g. "Jarvis, start a new task called backup_database with high priority"), automatically map it to the corresponding createTask or manageTask tool.`;
 
-      // Build previous messages formatted for gemini (just simple concat for now to keep it lightweight)
-      const history = this.messages().map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-      
-      const contents = `${history}\nUSER: ${text}`;
-
-      this.currentThought.set('Engaging LLM core...');
-
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
-        contents,
-        config: {
-          systemInstruction,
-          tools: [
-            { googleSearch: {} }, // Built-in google search
-            { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef] }
-          ],
-          toolConfig: { includeServerSideToolInvocations: true },
-          temperature: 0.3
-        }
-      });
-
       let finalResponse = '';
 
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        this.currentThought.set('Executing tool calls...');
-        for (const call of response.functionCalls) {
-          if (call.name === 'fileSearch') {
-            finalResponse += `\n[SYSTEM] Executed local file search for: ${(call.args as any).query}. Found 3 indexed nodes.\n`;
-          } else if (call.name === 'hardwareCommand') {
-            finalResponse += `\n[SYSTEM] Sent MQTT command '${(call.args as any).action}' to target '${(call.args as any).target}'.\n`;
-          } else if (call.name === 'createTask') {
-            finalResponse += `\n[SYSTEM] Created new task '${(call.args as any).taskName}' with priority '${(call.args as any).priority}'. Task ID: TSK-${Math.floor(Math.random() * 10000)}.\n`;
-          } else if (call.name === 'manageTask') {
-            finalResponse += `\n[SYSTEM] Action '${(call.args as any).action}' executed on Task ID '${(call.args as any).taskId}'.\n`;
-          }
-        }
-        
-        const previousContent = response.candidates?.[0]?.content;
-        const nextContents: any[] = previousContent ? [previousContent] : [];
-        nextContents.push(`[Tool output processed. Reply to the user.]`);
-
-        // Follow up call
-        const secondResponse = await this.ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
-          contents: nextContents,
-          config: { systemInstruction, temperature: 0.3 }
-        });
-        
-        finalResponse += secondResponse.text || 'Action complete.';
+      if (this.useLocalLLM()) {
+        this.currentThought.set('Engaging Local Open Source LLM (Ollama)...');
+        finalResponse = await this.processWithOllama(text, systemInstruction);
       } else {
-        finalResponse = response.text || 'No verbal response generated.';
+        if (!this.ai) throw new Error('No LLM Provider available (Gemini API missing and Local LLM disabled)');
+        this.currentThought.set('Engaging Cloud LLM core...');
+        finalResponse = await this.processWithGemini(text, systemInstruction);
       }
 
       this.addMessage('assistant', finalResponse.trim());
-      
-      // Let's generate speech for the assistant text if desired.
       this.speak(finalResponse.replace(/\[.*?\]/g, '').trim());
 
     } catch (e: any) {
-      this.addMessage('system', `ERROR: ${e.message}`);
+      this.addMessage('system', `ERROR: ${e.message}\n(Hint: If using Local LLM, ensure Ollama is running on localhost:11434 with llama3)`);
+      this.speak('I encountered an error connecting to the intelligence network.');
     } finally {
       this.currentThought.set('');
       this.isProcessing.set(false);
     }
   }
 
-  private speak(text: string) {
-    if (typeof window === 'undefined') return;
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.1;
-      utterance.pitch = 0.9;
-      // Ideally try to find an english voice that sounds a bit robotic or british.
-      const voices = window.speechSynthesis.getVoices();
-      const ukVoice = voices.find(v => v.lang === 'en-GB' || v.name.includes('UK'));
-      if (ukVoice) utterance.voice = ukVoice;
-      window.speechSynthesis.speak(utterance);
+  private mapOllamaTools() {
+    return [
+      { type: 'function', function: { name: createTaskDef.name, description: createTaskDef.description, parameters: createTaskDef.parameters } },
+      { type: 'function', function: { name: manageTaskDef.name, description: manageTaskDef.description, parameters: manageTaskDef.parameters } },
+      { type: 'function', function: { name: hardwareCommandDef.name, description: hardwareCommandDef.description, parameters: hardwareCommandDef.parameters } },
+      { type: 'function', function: { name: fileSearchDef.name, description: fileSearchDef.description, parameters: fileSearchDef.parameters } },
+    ];
+  }
+
+  private async processWithOllama(text: string, systemInstruction: string): Promise<string> {
+    const history = this.messages()
+        .filter(m => m.role !== 'system' || m.content.startsWith('INITIALIZING'))
+        .map(m => ({ role: m.role === 'system' ? 'assistant' : m.role, content: m.content }));
+    
+    // Override first message to be system instruction for ollama format
+    const messages = [
+      { role: 'system', content: systemInstruction },
+      ...history,
+      { role: 'user', content: text }
+    ];
+
+    const response = await fetch('http://localhost:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3', // commonly available free model
+        messages: messages,
+        stream: false,
+        tools: this.mapOllamaTools()
+      })
+    });
+
+    if (!response.ok) throw new Error('Local LLM (Ollama) is not reachable.');
+
+    const data = await response.json();
+    let finalResponse = '';
+
+    if (data.message?.tool_calls?.length > 0) {
+      this.currentThought.set('Executing local tool calls...');
+      for (const call of data.message.tool_calls) {
+         const args = call.function.arguments;
+         finalResponse += this.executeTool(call.function.name, args);
+      }
+      
+      messages.push(data.message); // assistant message with tool calls
+      messages.push({
+         role: 'tool',
+         content: 'Tool execution logs:\n' + finalResponse
+      });
+
+      // Fetch follow-up
+      const followUp = await fetch('http://localhost:11434/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3',
+          messages: messages,
+          stream: false
+        })
+      });
+      const followUpData = await followUp.json();
+      finalResponse += '\n' + (followUpData.message?.content || 'Action completed.');
+    } else {
+      finalResponse = data.message?.content || 'No verbal response generated.';
     }
+
+    return finalResponse;
+  }
+
+  private executeTool(name: string, args: any): string {
+    if (name === 'fileSearch') {
+      const q = args.query.toLowerCase();
+      const files = this.uploadedFiles();
+      const matches = files.filter(f => f.content.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
+      
+      if (matches.length > 0) {
+        let result = `\n[SYSTEM] Executed local file search for: ${args.query}.\nFound in ${matches.length} file(s):\n`;
+        matches.forEach(m => {
+          const index = m.content.toLowerCase().indexOf(q);
+          const snippet = index !== -1 
+            ? m.content.substring(Math.max(0, index - 50), Math.min(m.content.length, index + 50)) 
+            : '';
+          result += `- ${m.name}: "...${snippet.replace(/\n/g, ' ')}..."\n`;
+        });
+        return result;
+      } else {
+        return `\n[SYSTEM] Executed local file search for: ${args.query}. Found 0 indexed nodes.\n`;
+      }
+    } else if (name === 'hardwareCommand') {
+      return `\n[SYSTEM] Sent MQTT command '${args.action}' to target '${args.target}'.\n`;
+    } else if (name === 'createTask') {
+      return `\n[SYSTEM] Created new task '${args.taskName}' with priority '${args.priority}'. Task ID: TSK-${Math.floor(Math.random() * 10000)}.\n`;
+    } else if (name === 'manageTask') {
+      return `\n[SYSTEM] Action '${args.action}' executed on Task ID '${args.taskId}'.\n`;
+    }
+    return '';
+  }
+
+  private async processWithGemini(text: string, systemInstruction: string): Promise<string> {
+    const history = this.messages().map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+    const contents = `${history}\nUSER: ${text}`;
+
+    const response = await this.ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents,
+      config: {
+        systemInstruction,
+        tools: [
+          { googleSearch: {} },
+          { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef] as unknown as FunctionDeclaration[] }
+        ],
+        toolConfig: { includeServerSideToolInvocations: true },
+        temperature: 0.3
+      }
+    });
+
+    let finalResponse = '';
+
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      this.currentThought.set('Executing tool calls...');
+      for (const call of response.functionCalls) {
+        finalResponse += this.executeTool(call.name, call.args);
+      }
+      
+      const previousContent = response.candidates?.[0]?.content;
+      const nextContents: any[] = previousContent ? [previousContent] : [];
+      nextContents.push(`[Tool output processed. Reply to the user.]`);
+
+      const secondResponse = await this.ai.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: nextContents,
+        config: { systemInstruction, temperature: 0.3 }
+      });
+      
+      finalResponse += secondResponse.text || 'Action complete.';
+    } else {
+      finalResponse = response.text || 'No verbal response generated.';
+    }
+
+    return finalResponse;
   }
 }
+
