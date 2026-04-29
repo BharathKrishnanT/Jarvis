@@ -1,0 +1,9 @@
+{
+  "name": "Central Intelligence Core",
+  "description": "A JARVIS-inspired AI dashboard with 3D visualization, voice synthesis, and agentic capabilities.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": []
+}
