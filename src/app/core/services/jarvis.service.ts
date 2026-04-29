@@ -91,7 +91,7 @@ export class JarvisService {
   public uploadedFiles = signal<{name: string, content: string}[]>([]);
   
   // Use Local Ollama API (Free Open Source App)
-  public useLocalLLM = signal<boolean>(false);
+  public useLocalLLM = signal<boolean>(true);
   
   public metrics = signal<SystemMetrics>({
     cpu: 12,
