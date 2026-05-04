@@ -5,6 +5,7 @@ export interface JarvisMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
+  imageUrl?: string;
 }
 
 export interface SystemMetrics {
@@ -77,6 +78,18 @@ const manageTaskDef = {
   }
 };
 
+const displayMediaDef = {
+  name: 'displayMedia',
+  description: 'Display an image visualization to the user. Use this when the user asks for a picture, a visual explanation, or to see what something looks like.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      imagePrompt: { type: Type.STRING, description: 'A detailed prompt describing what the image should show.' }
+    },
+    required: ['imagePrompt']
+  }
+};
+
 @Injectable({
   providedIn: 'root'
 })
@@ -86,6 +99,8 @@ export class JarvisService {
   public messages = signal<JarvisMessage[]>([]);
   public isProcessing = signal<boolean>(false);
   public currentThought = signal<string>('');
+  public currentImageUrl = signal<string | null>(null);
+  public isSpeaking = signal<boolean>(false);
   
   // Storage for uploaded files
   public uploadedFiles = signal<{name: string, content: string}[]>([]);
@@ -124,8 +139,8 @@ export class JarvisService {
     }));
   }
 
-  public addMessage(role: 'user' | 'assistant' | 'system', content: string) {
-    this.messages.update(msgs => [...msgs, { role, content, timestamp: new Date() }]);
+  public addMessage(role: 'user' | 'assistant' | 'system', content: string, imageUrl?: string) {
+    this.messages.update(msgs => [...msgs, { role, content, timestamp: new Date(), imageUrl }]);
   }
 
   public async uploadFile(file: File) {
@@ -149,6 +164,12 @@ export class JarvisService {
       const voices = window.speechSynthesis.getVoices();
       const ukVoice = voices.find(v => v.lang === 'en-GB' || v.name.includes('UK'));
       if (ukVoice) utterance.voice = ukVoice;
+      
+      utterance.onstart = () => this.isSpeaking.set(true);
+      utterance.onend = () => this.isSpeaking.set(false);
+      utterance.onerror = () => this.isSpeaking.set(false);
+      
+      this.isSpeaking.set(true);
       window.speechSynthesis.speak(utterance);
     }
   }
@@ -156,16 +177,18 @@ export class JarvisService {
   public async processInput(text: string) {
     if (!text.trim()) return;
     
-    this.addMessage('user', text);
-    this.isProcessing.set(true);
-    this.currentThought.set('Processing request...');
+      this.addMessage('user', text);
+      this.isProcessing.set(true);
+      this.currentThought.set('Processing request...');
+      this.currentImageUrl.set(null);
 
-    try {
-      const systemInstruction = `You are a highly advanced AI system inspired by JARVIS.
+      try {
+        const systemInstruction = `You are a highly advanced AI system inspired by JARVIS.
 Keep your responses precise, analytical, and professional. 
 Whenever you are asked to perform tasks outside simple text completion, use your tools. 
 If you perform an action via tools, narrate your process succinctly (e.g., "Accessing local file system...", "Deploying hardware command...").
-You can manage scheduled tasks and background processes. If a user natively asks to create or manage a task (e.g. "Jarvis, start a new task called backup_database with high priority"), automatically map it to the corresponding createTask or manageTask tool.`;
+You can manage scheduled tasks and background processes. If a user natively asks to create or manage a task (e.g. "Jarvis, start a new task called backup_database with high priority"), automatically map it to the corresponding createTask or manageTask tool.
+If the user asks to see something, an image, or a visualization, use the displayMedia tool to generate the visual.`;
 
       let finalResponse = '';
 
@@ -186,7 +209,7 @@ You can manage scheduled tasks and background processes. If a user natively asks
         finalResponse = await this.processWithGemini(text, systemInstruction);
       }
 
-      this.addMessage('assistant', finalResponse.trim());
+      this.addMessage('assistant', finalResponse.trim(), this.currentImageUrl() || undefined);
       this.speak(finalResponse.replace(/\[.*?\]/g, '').trim());
 
     } catch (e: any) {
@@ -204,6 +227,7 @@ You can manage scheduled tasks and background processes. If a user natively asks
       { type: 'function', function: { name: manageTaskDef.name, description: manageTaskDef.description, parameters: manageTaskDef.parameters } },
       { type: 'function', function: { name: hardwareCommandDef.name, description: hardwareCommandDef.description, parameters: hardwareCommandDef.parameters } },
       { type: 'function', function: { name: fileSearchDef.name, description: fileSearchDef.description, parameters: fileSearchDef.parameters } },
+      { type: 'function', function: { name: displayMediaDef.name, description: displayMediaDef.description, parameters: displayMediaDef.parameters } },
     ];
   }
 
@@ -292,6 +316,10 @@ You can manage scheduled tasks and background processes. If a user natively asks
       return `\n[SYSTEM] Created new task '${args.taskName}' with priority '${args.priority}'. Task ID: TSK-${Math.floor(Math.random() * 10000)}.\n`;
     } else if (name === 'manageTask') {
       return `\n[SYSTEM] Action '${args.action}' executed on Task ID '${args.taskId}'.\n`;
+    } else if (name === 'displayMedia') {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(args.imagePrompt)}?width=800&height=400&nologo=true`;
+      this.currentImageUrl.set(url);
+      return `\n[SYSTEM] Generated and displayed visualization for prompt: '${args.imagePrompt}'.\n`;
     }
     return '';
   }
@@ -307,7 +335,7 @@ You can manage scheduled tasks and background processes. If a user natively asks
         systemInstruction,
         tools: [
           { googleSearch: {} },
-          { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef] as unknown as FunctionDeclaration[] }
+          { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef, displayMediaDef] as unknown as FunctionDeclaration[] }
         ],
         toolConfig: { includeServerSideToolInvocations: true },
         temperature: 0.3
@@ -318,13 +346,22 @@ You can manage scheduled tasks and background processes. If a user natively asks
 
     if (response.functionCalls && response.functionCalls.length > 0) {
       this.currentThought.set('Executing tool calls...');
+      const functionResponseParts = [];
       for (const call of response.functionCalls) {
-        finalResponse += this.executeTool(call.name, call.args);
+        const resText = this.executeTool(call.name, call.args);
+        finalResponse += resText;
+        functionResponseParts.push({
+          functionResponse: {
+            name: call.name,
+            response: { result: resText }
+          }
+        });
       }
       
+      const userContent = { role: 'user', parts: [{ text: contents }] };
       const previousContent = response.candidates?.[0]?.content;
-      const nextContents: any[] = previousContent ? [previousContent] : [];
-      nextContents.push(`[Tool output processed. Reply to the user.]`);
+      const nextContents: any[] = previousContent ? [userContent, previousContent] : [userContent];
+      nextContents.push({ role: 'user', parts: functionResponseParts });
 
       const secondResponse = await this.ai.models.generateContent({
         model: 'gemini-3.1-pro-preview',

@@ -1,4 +1,4 @@
-import { Component, ElementRef, ViewChild, inject, AfterViewChecked, ChangeDetectorRef } from '@angular/core';
+import { Component, ElementRef, ViewChild, inject, AfterViewChecked, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { JarvisService } from '../services/jarvis.service';
@@ -28,16 +28,33 @@ import { JarvisService } from '../services/jarvis.service';
               'border-[#00d2ff]/30': msg.role === 'system',
               'border-white/20': msg.role === 'user',
               'border-[#a0a0a0]/20': msg.role === 'assistant'
-            }">{{msg.content}}</div>
+            }">
+              {{msg.content}}
+              @if (msg.imageUrl) {
+                <div class="mt-4 mb-2 rounded-sm overflow-hidden border border-[#222]">
+                  <img [src]="msg.imageUrl" alt="Visualization" referrerpolicy="no-referrer" class="w-full max-w-sm h-auto object-cover opacity-90 transition-opacity hover:opacity-100" />
+                </div>
+              }
+            </div>
           </div>
         }
       </div>
 
-      <!-- Processing indicator -->
+      <!-- Status Indicator -->
       @if (jarvis.isProcessing()) {
-        <div class="px-4 py-2 text-[#00d2ff] text-xs font-mono tracking-wider animate-pulse flex items-center gap-2 border-t border-[#222]">
+        <div class="px-4 py-2 text-[#00d2ff] bg-[#00d2ff]/10 text-xs font-mono tracking-wider animate-pulse flex items-center gap-2 border-t border-b border-[#00d2ff]/20">
           <span class="inline-block w-2 h-2 bg-[#00d2ff]"></span>
           {{jarvis.currentThought() || 'PROCESSING...'}}
+        </div>
+      } @else if (isListening && !jarvis.isSpeaking()) {
+        <div class="px-4 py-2 text-red-500 bg-red-500/10 text-xs font-mono tracking-wider flex items-center gap-2 border-t border-b border-red-500/20">
+          <div class="flex items-end gap-[3px] h-3">
+            <div class="w-1 h-1.5 bg-red-500 animate-[bounce_1s_infinite_0ms]"></div>
+            <div class="w-1 h-3 bg-red-500 animate-[bounce_1s_infinite_100ms]"></div>
+            <div class="w-1 h-2 bg-red-500 animate-[bounce_1s_infinite_200ms]"></div>
+            <div class="w-1 h-2.5 bg-red-500 animate-[bounce_1s_infinite_300ms]"></div>
+          </div>
+          [VOICE UPLINK ACTIVE] AWAITING AUDIO...
         </div>
       }
 
@@ -80,7 +97,7 @@ import { JarvisService } from '../services/jarvis.service';
     .scrollbar-thin::-webkit-scrollbar-thumb { background: #333; }
   `]
 })
-export class TerminalComponent implements AfterViewChecked {
+export class TerminalComponent implements AfterViewChecked, OnDestroy {
   @ViewChild('scrollContainer') scrollContainer!: ElementRef;
   
   jarvis = inject(JarvisService);
@@ -94,6 +111,14 @@ export class TerminalComponent implements AfterViewChecked {
 
   constructor() {
     this.initSpeechRecognition();
+  }
+
+  ngOnDestroy() {
+    if (this.recognitionTimer) clearInterval(this.recognitionTimer);
+    if (this.recognition) {
+       this.isAlwaysListening = false;
+       this.recognition.stop();
+    }
   }
 
   ngAfterViewChecked() {
@@ -124,13 +149,14 @@ export class TerminalComponent implements AfterViewChecked {
     }
   }
 
+  recognitionTimer: any;
+
   initSpeechRecognition() {
     if (typeof window === 'undefined') return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       this.recognition = new SpeechRecognition();
-      // Continuous listening for wake word
-      this.recognition.continuous = true;
+      this.recognition.continuous = false;
       this.recognition.interimResults = true;
       this.recognition.lang = 'en-US';
 
@@ -140,8 +166,8 @@ export class TerminalComponent implements AfterViewChecked {
       };
 
       this.recognition.onresult = (event: any) => {
-        let finalTranscript = '';
         let interimTranscript = '';
+        let finalTranscript = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
@@ -151,20 +177,25 @@ export class TerminalComponent implements AfterViewChecked {
           }
         }
 
-        const fullText = (finalTranscript || interimTranscript).toLowerCase();
-        
-        // Wake word detection
-        if (fullText.includes('jarvis') || fullText.includes('wake up')) {
-          const wakeIndex = Math.max(fullText.lastIndexOf('jarvis'), fullText.lastIndexOf('wake up'));
-          const cmdLength = fullText.lastIndexOf('jarvis') > fullText.lastIndexOf('wake up') ? 6 : 7;
+        // Show what's being said in the input bar
+        this.inputCtrl.setValue((interimTranscript || finalTranscript).trim());
+
+        if (finalTranscript) {
+          let command = finalTranscript.trim();
           
-          const command = fullText.substring(wakeIndex + cmdLength).trim();
-          
-          if (command && event.results[event.results.length - 1].isFinal) {
-            this.inputCtrl.setValue(command);
-            this.submit();
+          // Optional wake-word removal if they still use it
+          if (command.toLowerCase().startsWith('jarvis')) {
+            command = command.substring(6).trim();
+          } else if (command.toLowerCase().startsWith('wake up')) {
+            command = command.substring(7).trim();
+          }
+
+          if (command) {
+             this.inputCtrl.setValue(command);
+             this.submit();
           }
         }
+        
         this.cdr.detectChanges();
       };
 
@@ -172,6 +203,7 @@ export class TerminalComponent implements AfterViewChecked {
         console.error('Speech recognition error', event.error);
         if (event.error !== 'no-speech') {
           this.isListening = false;
+          this.isAlwaysListening = false;
         }
         this.cdr.detectChanges();
       };
@@ -179,18 +211,26 @@ export class TerminalComponent implements AfterViewChecked {
       this.recognition.onend = () => {
         this.isListening = false;
         this.cdr.detectChanges();
-        // Auto restart if always listening mode is enabled
-        if (this.isAlwaysListening) {
-          setTimeout(() => {
-            try { this.recognition.start(); } catch(e) {}
-          }, 500);
-        }
       };
+
+      // Poll to keep recognition alive if always listening and not busy
+      this.recognitionTimer = setInterval(() => {
+        if (this.isAlwaysListening && !this.isListening && !this.jarvis.isProcessing() && !this.jarvis.isSpeaking()) {
+            try { this.recognition.start(); } catch(e) {}
+        }
+        // If we are listening, but jarvis starts speaking, stop it.
+        if (this.isListening && (this.jarvis.isProcessing() || this.jarvis.isSpeaking())) {
+            try { this.recognition.stop(); } catch(e) {}
+        }
+      }, 500);
     }
   }
 
   toggleListening() {
-    if (!this.recognition) return;
+    if (!this.recognition) {
+      alert("Speech recognition not supported in this browser.");
+      return;
+    }
     
     this.isAlwaysListening = !this.isAlwaysListening;
     

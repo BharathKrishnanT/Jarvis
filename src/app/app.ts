@@ -1,12 +1,14 @@
-import {ChangeDetectionStrategy, Component} from '@angular/core';
+import {ChangeDetectionStrategy, Component, signal} from '@angular/core';
 import { Visualizer3dComponent } from './core/components/visualizer3d';
 import { TerminalComponent } from './core/components/terminal';
 import { HudComponent } from './core/components/hud';
+import { TaskManagerComponent } from './core/components/task-manager';
+import { CommonModule } from '@angular/common';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-root',
-  imports: [Visualizer3dComponent, TerminalComponent, HudComponent],
+  imports: [Visualizer3dComponent, TerminalComponent, HudComponent, TaskManagerComponent, CommonModule],
   template: `
     <div class="h-screen w-screen overflow-hidden bg-[#050505] text-[#e0e0e0] font-sans relative flex flex-col p-4 md:p-8">
       
@@ -43,9 +45,27 @@ import { HudComponent } from './core/components/hud';
           <app-visualizer3d></app-visualizer3d>
         </div>
 
-        <!-- Terminal Panel -->
+        <!-- Right Panel (Terminal / Tasks) -->
         <div class="lg:col-span-1 h-[40vh] lg:h-full flex flex-col min-h-0">
-          <app-terminal class="flex-1 min-h-0"></app-terminal>
+          <!-- Tabs -->
+          <div class="flex gap-1 mb-2 font-mono text-xs tracking-widest uppercase shrink-0">
+            <button (click)="activeTab.set('terminal')" 
+              class="px-4 py-2 border border-b-0 border border-[#222] transition-colors"
+              [ngClass]="activeTab() === 'terminal' ? 'bg-[#111] text-[#00d2ff] border-[#333]' : 'bg-[#0a0a0a]/50 text-[#555] hover:text-white'">
+              [TERMINAL]
+            </button>
+            <button (click)="activeTab.set('tasks')" 
+              class="px-4 py-2 border border-b-0 border border-[#222] transition-colors"
+              [ngClass]="activeTab() === 'tasks' ? 'bg-[#111] text-[#00d2ff] border-[#333]' : 'bg-[#0a0a0a]/50 text-[#555] hover:text-white'">
+              [TASKS]
+            </button>
+          </div>
+          
+          <!-- Content -->
+          <div class="flex-1 min-h-0 relative">
+            <app-terminal class="absolute inset-0" [class.invisible]="activeTab() !== 'terminal'"></app-terminal>
+            <app-task-manager class="absolute inset-0" [class.invisible]="activeTab() !== 'tasks'"></app-task-manager>
+          </div>
         </div>
       </main>
 
@@ -59,4 +79,6 @@ import { HudComponent } from './core/components/hud';
     :host { display: block; height: 100vh; width: 100vw; overflow: hidden; }
   `]
 })
-export class App {}
+export class App {
+  activeTab = signal<'terminal' | 'tasks'>('terminal');
+}
