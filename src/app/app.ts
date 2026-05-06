@@ -1,9 +1,10 @@
-import {ChangeDetectionStrategy, Component, signal} from '@angular/core';
+import {ChangeDetectionStrategy, Component, signal, inject} from '@angular/core';
 import { Visualizer3dComponent } from './core/components/visualizer3d';
 import { TerminalComponent } from './core/components/terminal';
 import { HudComponent } from './core/components/hud';
 import { TaskManagerComponent } from './core/components/task-manager';
 import { CommonModule } from '@angular/common';
+import { JarvisService } from './core/services/jarvis.service';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,17 +33,26 @@ import { CommonModule } from '@angular/common';
       <!-- Main Content -->
       <main class="z-10 flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 min-h-0">
         
-        <!-- 3D Visualization -->
-        <div class="lg:col-span-2 relative h-[40vh] lg:h-full border border-[#1a1a1a] rounded-sm overflow-hidden bg-[#0a0a0a]/50">
+        <!-- 3D Visualization or Media Display -->
+        <div class="lg:col-span-2 relative h-[40vh] lg:h-full border border-[#1a1a1a] rounded-sm overflow-hidden bg-[#0a0a0a]/50 flex items-center justify-center">
           <!-- Overlays -->
-          <div class="absolute top-4 left-4 text-[10px] font-mono text-[#00d2ff] tracking-widest uppercase opacity-60">
+          <div class="absolute top-4 left-4 text-[10px] font-mono text-[#00d2ff] tracking-widest uppercase opacity-60 z-20">
             [VIZ_DATAPOINT_RENDER]
           </div>
-          <div class="absolute bottom-4 right-4 text-[10px] font-mono text-[#00d2ff] tracking-widest uppercase opacity-60 flex items-center gap-2">
+          <div class="absolute bottom-4 right-4 text-[10px] font-mono text-[#00d2ff] tracking-widest uppercase opacity-60 flex items-center gap-2 z-20">
             LAT <span class="w-1 h-1 bg-[#00d2ff] rounded-full animate-ping"></span>
           </div>
           
-          <app-visualizer3d></app-visualizer3d>
+          @if (jarvis.currentImageUrl()) {
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-black/80">
+                <img [src]="jarvis.currentImageUrl()" alt="Visualization" referrerpolicy="no-referrer" class="max-w-full max-h-full object-contain" />
+                <button (click)="jarvis.currentImageUrl.set(null)" class="absolute top-4 right-4 text-xs font-mono border border-white/20 bg-black/50 hover:bg-black text-white px-2 py-1 rounded transition-colors backdrop-blur">
+                  [DISMISS]
+                </button>
+            </div>
+          } @else {
+            <app-visualizer3d class="w-full h-full"></app-visualizer3d>
+          }
         </div>
 
         <!-- Right Panel (Terminal / Tasks) -->
@@ -80,5 +90,6 @@ import { CommonModule } from '@angular/common';
   `]
 })
 export class App {
+  jarvis = inject(JarvisService);
   activeTab = signal<'terminal' | 'tasks'>('terminal');
 }

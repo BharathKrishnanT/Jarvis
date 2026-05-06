@@ -30,11 +30,6 @@ import { JarvisService } from '../services/jarvis.service';
               'border-[#a0a0a0]/20': msg.role === 'assistant'
             }">
               {{msg.content}}
-              @if (msg.imageUrl) {
-                <div class="mt-4 mb-2 rounded-sm overflow-hidden border border-[#222]">
-                  <img [src]="msg.imageUrl" alt="Visualization" referrerpolicy="no-referrer" class="w-full max-w-sm h-auto object-cover opacity-90 transition-opacity hover:opacity-100" />
-                </div>
-              }
             </div>
           </div>
         }

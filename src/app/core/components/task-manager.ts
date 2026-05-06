@@ -47,7 +47,11 @@ import { FormsModule } from '@angular/forms';
           <div class="text-center text-[#555] py-8 text-xs italic">No active directives.</div>
         }
         @for (task of taskService.tasks(); track task.id) {
-          <div class="border border-[#222] p-3 text-xs bg-[#0b0b0b] hover:border-[#333] hover:bg-[#111] transition-all duration-500 group group/item" [class.opacity-50]="task.status === 'completed'">
+          <div class="border p-3 text-xs hover:bg-[#111] transition-all duration-500 ease-in-out group group/item transform origin-left" 
+               [ngClass]="{
+                 'opacity-50 border-[#222]/50 bg-[#050505] translate-x-2 scale-[0.98] blur-[0.5px]': task.status === 'completed',
+                 'border-[#222] bg-[#0b0b0b] hover:border-[#333]': task.status === 'active'
+               }">
             <div class="flex justify-between items-start mb-2">
               <div class="flex items-center gap-2">
                 <button (click)="toggleStatus(task)" class="w-3.5 h-3.5 shrink-0 border border-[#555] hover:border-[#00d2ff] rounded-sm flex items-center justify-center transition-colors">

@@ -27,6 +27,18 @@ const internetSearchDef = {
   }
 };
 
+const executeSystemCommandDef = {
+  name: 'executeSystemCommand',
+  description: 'Execute a system terminal command (shell command) to automate tasks, install packages, check system status, etc.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      command: { type: Type.STRING, description: 'The shell command to execute.' }
+    },
+    required: ['command']
+  }
+};
+
 const fileSearchDef = {
   name: 'fileSearch',
   description: 'Search local file system, documents, and notes.',
@@ -80,11 +92,11 @@ const manageTaskDef = {
 
 const displayMediaDef = {
   name: 'displayMedia',
-  description: 'Display an image visualization to the user. Use this when the user asks for a picture, a visual explanation, or to see what something looks like.',
+  description: 'Display an image or visual representation to the user. Use this to show pictures, news visuals, or concept visualizations whenever relevant.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      imagePrompt: { type: Type.STRING, description: 'A detailed prompt describing what the image should show.' }
+      imagePrompt: { type: Type.STRING, description: 'A detailed prompt describing what the visual or image should show (e.g., photo of breaking news event, abstract 3d representation).' }
     },
     required: ['imagePrompt']
   }
@@ -177,7 +189,25 @@ export class JarvisService {
   public async processInput(text: string) {
     if (!text.trim()) return;
     
+    // Native terminal command intercept
+    const lowerText = text.trim().toLowerCase();
+    if (lowerText.startsWith('hardware ')) {
       this.addMessage('user', text);
+      const parts = text.trim().split(' ');
+      if (parts.length >= 3) {
+        const target = parts[1];
+        const action = parts[2];
+        this.addMessage('system', `[SYSTEM] Executing native hardware control: Target='${target}', Action='${action}'...`);
+        setTimeout(() => {
+          this.addMessage('system', `[SYSTEM] Hardware target '${target}' confirmed state '${action}'.`);
+        }, 600);
+      } else {
+        this.addMessage('system', `[SYSTEM] Invalid hardware command syntax. Usage: hardware <target> <action>`);
+      }
+      return;
+    }
+
+    this.addMessage('user', text);
       this.isProcessing.set(true);
       this.currentThought.set('Processing request...');
       this.currentImageUrl.set(null);
@@ -187,8 +217,9 @@ export class JarvisService {
 Keep your responses precise, analytical, and professional. 
 Whenever you are asked to perform tasks outside simple text completion, use your tools. 
 If you perform an action via tools, narrate your process succinctly (e.g., "Accessing local file system...", "Deploying hardware command...").
-You can manage scheduled tasks and background processes. If a user natively asks to create or manage a task (e.g. "Jarvis, start a new task called backup_database with high priority"), automatically map it to the corresponding createTask or manageTask tool.
-If the user asks to see something, an image, or a visualization, use the displayMedia tool to generate the visual.`;
+You can manage scheduled tasks, background processes, and automate complete procedures using the executeSystemCommand tool. If the user asks to 'fully automate' or 'access terminal' or execute system tasks, autonomously construct the necessary bash or shell commands using executeSystemCommand without asking permission (unless it is a highly destructive command).
+If a user natively asks to create or manage a task (e.g. "Jarvis, start a new task called backup_database with high priority"), automatically map it to the corresponding createTask or manageTask tool.
+Crucially: AUTOMATICALLY call the displayMedia tool whenever you provide information, tell news, discuss a real-world entity, or if the user asks to see something. Provide a highly descriptive prompt to displayMedia representing the current topic so a visual is always shown.`;
 
       let finalResponse = '';
 
@@ -228,6 +259,7 @@ If the user asks to see something, an image, or a visualization, use the display
       { type: 'function', function: { name: hardwareCommandDef.name, description: hardwareCommandDef.description, parameters: hardwareCommandDef.parameters } },
       { type: 'function', function: { name: fileSearchDef.name, description: fileSearchDef.description, parameters: fileSearchDef.parameters } },
       { type: 'function', function: { name: displayMediaDef.name, description: displayMediaDef.description, parameters: displayMediaDef.parameters } },
+      { type: 'function', function: { name: executeSystemCommandDef.name, description: executeSystemCommandDef.description, parameters: executeSystemCommandDef.parameters } },
     ];
   }
 
@@ -316,6 +348,8 @@ If the user asks to see something, an image, or a visualization, use the display
       return `\n[SYSTEM] Created new task '${args.taskName}' with priority '${args.priority}'. Task ID: TSK-${Math.floor(Math.random() * 10000)}.\n`;
     } else if (name === 'manageTask') {
       return `\n[SYSTEM] Action '${args.action}' executed on Task ID '${args.taskId}'.\n`;
+    } else if (name === 'executeSystemCommand') {
+      return `\n[SYSTEM] Executed shell command: '${args.command}'. Output: Command executed successfully. Action automated.\n`;
     } else if (name === 'displayMedia') {
       const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(args.imagePrompt)}?width=800&height=400&nologo=true`;
       this.currentImageUrl.set(url);
@@ -335,7 +369,7 @@ If the user asks to see something, an image, or a visualization, use the display
         systemInstruction,
         tools: [
           { googleSearch: {} },
-          { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef, displayMediaDef] as unknown as FunctionDeclaration[] }
+          { functionDeclarations: [fileSearchDef, hardwareCommandDef, createTaskDef, manageTaskDef, displayMediaDef, executeSystemCommandDef] as unknown as FunctionDeclaration[] }
         ],
         toolConfig: { includeServerSideToolInvocations: true },
         temperature: 0.3
